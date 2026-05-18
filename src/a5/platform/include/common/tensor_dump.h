@@ -75,6 +75,55 @@ enum class TensorDumpStage : uint8_t {
 };
 
 // =============================================================================
+// DumpRecordKind - Logical record type carried by the dump channel
+// =============================================================================
+
+enum class DumpRecordKind : uint8_t {
+    TENSOR = 0,
+    ARGS = 1,
+};
+
+// =============================================================================
+// Args dump payload schema
+// =============================================================================
+
+constexpr uint32_t ARGS_DUMP_PAYLOAD_VERSION = 1;
+
+struct ArgsDumpPayloadHeader {
+    uint32_t version;
+    uint32_t tensor_count;
+    uint32_t scalar_count;
+    uint32_t tensor_entry_size;
+    uint32_t scalar_entry_size;
+    uint32_t reserved;
+};
+
+struct ArgsDumpTensorEntry {
+    uint64_t buffer_addr;
+    uint64_t buffer_size;
+    uint64_t owner_task_id;
+    uint32_t shapes[PLATFORM_DUMP_MAX_DIMS];
+    uint32_t raw_shapes[PLATFORM_DUMP_MAX_DIMS];
+    uint32_t offsets[PLATFORM_DUMP_MAX_DIMS];
+    uint32_t ndims;
+    uint8_t dtype;
+    uint8_t is_contiguous;
+    uint8_t is_all_offset_zero;
+    uint8_t reserved;
+};
+
+struct ArgsDumpInfo {
+    uint64_t task_id;
+    uint8_t subtask_id;
+    TensorDumpStage stage;
+    uint32_t func_id;
+    uint32_t tensor_count;
+    uint32_t scalar_count;
+    const ArgsDumpTensorEntry *tensors;
+    const uint64_t *scalars;
+};
+
+// =============================================================================
 // TensorDumpRecord - Single Tensor Dump Entry (128B = 2 cache lines)
 // =============================================================================
 
