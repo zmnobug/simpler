@@ -47,19 +47,34 @@
  *             entry from KernelArgs::aicore_ring_addr[block_idx] via
  *             set_aicore_l2_perf_ring()/get_aicore_l2_perf_ring())
  * @param task_id Register dispatch id (DATA_MAIN_BASE), stored in task_id low 32 bits
- * @param start_time Start timestamp
- * @param end_time End timestamp
+ * @param start_time Kernel compute start timestamp
+ * @param end_time Kernel-visible completion timestamp
+ * @param ack_time Timestamp just before ACK is written
+ * @param compute_end_time Timestamp immediately after execute_task()
+ * @param barrier_end_time Timestamp after optional dump/barrier work
  */
 __aicore__ __attribute__((always_inline)) static inline void
-l2_perf_aicore_record_task(__gm__ L2PerfAicoreRing *ring, uint32_t task_id, uint64_t start_time, uint64_t end_time) {
+l2_perf_aicore_record_task(
+    __gm__ L2PerfAicoreRing *ring, uint32_t task_id, uint64_t start_time, uint64_t end_time, uint64_t ack_time,
+    uint64_t compute_end_time, uint64_t barrier_end_time
+) {
     __gm__ L2PerfRecord *record = &ring->dual_issue_slots[task_id % PLATFORM_L2_AICORE_RING_SIZE];
 
     record->start_time = start_time;
     record->end_time = end_time;
+    record->duration = end_time - start_time;
+    record->ack_time = ack_time;
+    record->compute_end_time = compute_end_time;
+    record->barrier_end_time = barrier_end_time;
     record->task_id = static_cast<uint64_t>(task_id);
 
-    // Flush cache to make data visible to AICPU
+    // Flush all cache lines that may contain AICore-written fields. The CCE
+    // dcci intrinsic only accepts cache-line mode constants, not arbitrary
+    // byte sizes.
     dcci(record, SINGLE_CACHE_LINE, CACHELINE_OUT);
+    dcci(&record->kernel_event_count, SINGLE_CACHE_LINE, CACHELINE_OUT);
+    dcci(&record->kernel_events[3], SINGLE_CACHE_LINE, CACHELINE_OUT);
+    dcci(&record->kernel_events[7], SINGLE_CACHE_LINE, CACHELINE_OUT);
     dsb((mem_dsb_t)0);
 }
 

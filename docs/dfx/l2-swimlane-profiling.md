@@ -121,6 +121,14 @@ runs):
 Filenames are fixed (no per-file timestamp) — the directory is the
 per-task uniqueness boundary.
 
+On A2A3 and A5 sim, the same run may also emit
+`l0-swimlane-npu-model.json`. This sibling file is produced by
+`l0-swimlane-npu-model` and carries host-side L0 kernel-span events
+correlated by `task_id` with both `l2_perf_records.json` and
+dump-args entries. See
+[l0-swimlane-npu-model.md](l0-swimlane-npu-model.md) for the L0
+schema and validation flow.
+
 `l2_perf_records.json` carries the raw records — this is the file
 you pass to `swimlane_converter`. Important fields per task:
 
@@ -172,6 +180,9 @@ in. The trace contains:
 - **AICPU View** — scheduler thread lanes with per-iteration
   phase blocks coloured by `phase_id`.
 - **AICPU Scheduler** — orchestrator phase summary at the top.
+- **AICore L0 View** - optional `l0-swimlane-npu-model`
+  kernel-span events loaded from sibling `l0-swimlane-npu-model.json`
+  when that file exists.
 
 When the run also emitted a device log (`device-*` file under
 `outputs/`), `swimlane_converter` resolves the nearest log by

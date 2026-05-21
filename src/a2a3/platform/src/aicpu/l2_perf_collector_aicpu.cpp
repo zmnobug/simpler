@@ -260,9 +260,7 @@ int l2_perf_aicpu_complete_record(
 
     // Read AICore-published timing from the per-core staging ring.
     L2PerfRecord *slot = &ring->dual_issue_slots[expected_reg_task_id % PLATFORM_L2_AICORE_RING_SIZE];
-    // One PoC cache line: matches AICore l2_perf_aicore_record_task() dcci(..., SINGLE_CACHE_LINE, ...)
-    // and aicpu/cache_ops.cpp step size; timing fields live in the first line.
-    cache_invalidate_range(slot, 64);
+    cache_invalidate_range(slot, sizeof(L2PerfRecord));
     if (static_cast<uint32_t>(slot->task_id) != expected_reg_task_id) {
         // Hard error: the runtime's completion-before-dispatch invariant
         // guarantees AICore must have published this slot before AICPU sees
@@ -282,6 +280,17 @@ int l2_perf_aicpu_complete_record(
     L2PerfRecord *record = &l2_perf_buf->records[count];
     record->start_time = slot->start_time;
     record->end_time = slot->end_time;
+    record->duration = slot->duration;
+    record->ack_time = slot->ack_time;
+    record->compute_end_time = slot->compute_end_time;
+    record->barrier_end_time = slot->barrier_end_time;
+    uint32_t kernel_event_count =
+        (slot->kernel_event_count > L2_KERNEL_EVENT_MAX) ? L2_KERNEL_EVENT_MAX : slot->kernel_event_count;
+    record->kernel_event_count = kernel_event_count;
+    record->kernel_event_overflow = slot->kernel_event_overflow;
+    for (uint32_t i = 0; i < kernel_event_count; i++) {
+        record->kernel_events[i] = slot->kernel_events[i];
+    }
 
     // Fill AICPU-owned fields
     record->task_id = task_id;

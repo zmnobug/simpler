@@ -36,6 +36,7 @@ static pthread_key_t g_core_id_key;
 static pthread_key_t g_block_idx_key;
 static pthread_key_t g_aicore_profiling_flag_key;
 static pthread_key_t g_aicore_l2_perf_ring_key;
+static pthread_key_t g_aicore_l0_current_task_id_key;
 static pthread_key_t g_aicore_pmu_ring_key;
 static pthread_key_t g_pmu_reg_base_key;
 static pthread_once_t g_tls_once = PTHREAD_ONCE_INIT;
@@ -46,6 +47,7 @@ static void create_tls_keys() {
     pthread_key_create(&g_block_idx_key, nullptr);
     pthread_key_create(&g_aicore_profiling_flag_key, nullptr);
     pthread_key_create(&g_aicore_l2_perf_ring_key, nullptr);
+    pthread_key_create(&g_aicore_l0_current_task_id_key, nullptr);
     pthread_key_create(&g_aicore_pmu_ring_key, nullptr);
     pthread_key_create(&g_pmu_reg_base_key, nullptr);
 }
@@ -73,6 +75,13 @@ __aicore__ void set_aicore_l2_perf_ring(__gm__ L2PerfAicoreRing *ring) {
 }
 __aicore__ __gm__ L2PerfAicoreRing *get_aicore_l2_perf_ring() {
     return reinterpret_cast<__gm__ L2PerfAicoreRing *>(pthread_getspecific(g_aicore_l2_perf_ring_key));
+}
+
+__aicore__ void set_aicore_l0_current_task_id(uint32_t task_id) {
+    pthread_setspecific(g_aicore_l0_current_task_id_key, reinterpret_cast<void *>(static_cast<uintptr_t>(task_id)));
+}
+__aicore__ uint32_t get_aicore_l0_current_task_id() {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pthread_getspecific(g_aicore_l0_current_task_id_key)));
 }
 
 __aicore__ void set_aicore_pmu_ring(__gm__ PmuAicoreRing *ring) {

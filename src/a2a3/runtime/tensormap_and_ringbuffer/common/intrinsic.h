@@ -123,6 +123,11 @@ struct LocalContext {
                         // NOT the same as RUNTIME_CONFIG.block_dim in kernel_config.py,
                         // which controls how many physical cores the runtime launches.
     AsyncCtx async_ctx;
+    // Reserved profiling fields. L0 swimlane markers are currently written by
+    // the AICore executor, not by business kernels through this context.
+    uint64_t l0_perf_ring;
+    uint32_t l0_reg_task_id;
+    uint32_t l0_reserved;
 };
 
 /**

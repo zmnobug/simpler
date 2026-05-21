@@ -339,6 +339,10 @@ static std::string dims_to_string(const uint32_t dims[], int ndims) {
     return ss.str();
 }
 
+static void write_hex_u64(std::ostream &os, uint64_t value) {
+    os << "0x" << std::hex << std::setfill('0') << std::setw(16) << value << std::dec;
+}
+
 static ArgsDumpPayloadHeader read_args_payload_header(const DumpedArgs &da) {
     ArgsDumpPayloadHeader header = {};
     if (da.bytes.size() >= sizeof(header)) {
@@ -633,8 +637,9 @@ int TensorDumpCollector::export_dump_files() {
         const DumpedArgs &da = collected_args_[i];
         ArgsDumpPayloadHeader header = read_args_payload_header(da);
         if (i > 0) json << ",\n";
-        json << "    {\"task_id\": \"0x" << std::hex << std::setfill('0') << std::setw(16) << da.task_id << std::dec
-             << "\", \"subtask_id\": " << static_cast<uint32_t>(da.subtask_id) << ", \"func_id\": " << da.func_id
+        json << "    {\"task_id\": \"";
+        write_hex_u64(json, da.task_id);
+        json << "\", \"subtask_id\": " << static_cast<uint32_t>(da.subtask_id) << ", \"func_id\": " << da.func_id
              << ", \"stage\": \"" << tensor_dump_stage_name(da.stage) << "\", \"tensor_count\": " << da.tensor_count
              << ", \"scalar_count\": " << da.scalar_count << ", \"payload_size\": " << da.payload_size
              << ", \"overwritten\": " << (da.overwritten ? "true" : "false") << ", \"tensors\": [";
@@ -644,10 +649,11 @@ int TensorDumpCollector::export_dump_files() {
                 break;
             }
             if (t > 0) json << ", ";
-            json << "{\"arg_index\": " << t << ", \"buffer_addr\": \"0x" << std::hex << entry.buffer_addr << std::dec
-                 << "\", \"buffer_size\": " << entry.buffer_size << ", \"owner_task_id\": \"0x" << std::hex
-                 << entry.owner_task_id << std::dec << "\", \"dtype\": \""
-                 << get_dtype_name_from_raw(entry.dtype) << "\", \"shape\": "
+            json << "{\"arg_index\": " << t << ", \"buffer_addr\": \"";
+            write_hex_u64(json, entry.buffer_addr);
+            json << "\", \"buffer_size\": " << entry.buffer_size << ", \"owner_task_id\": \"";
+            write_hex_u64(json, entry.owner_task_id);
+            json << "\", \"dtype\": \"" << get_dtype_name_from_raw(entry.dtype) << "\", \"shape\": "
                  << dims_to_string(entry.shapes, static_cast<int>(entry.ndims)) << ", \"raw_shape\": "
                  << dims_to_string(entry.raw_shapes, static_cast<int>(entry.ndims)) << ", \"offsets\": "
                  << dims_to_string(entry.offsets, static_cast<int>(entry.ndims)) << ", \"is_contiguous\": "
@@ -661,7 +667,9 @@ int TensorDumpCollector::export_dump_files() {
                 break;
             }
             if (s > 0) json << ", ";
-            json << "\"0x" << std::hex << value << std::dec << "\"";
+            json << "\"";
+            write_hex_u64(json, value);
+            json << "\"";
         }
         json << "]}";
     }

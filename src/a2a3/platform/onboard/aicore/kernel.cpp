@@ -44,6 +44,7 @@
 // compilation units.
 [[block_local]] static uint32_t s_aicore_profiling_flag;
 [[block_local]] static __gm__ L2PerfAicoreRing *s_aicore_l2_perf_ring;
+[[block_local]] static uint32_t s_aicore_l0_current_task_id;
 
 __attribute__((weak)) __aicore__ void set_aicore_profiling_flag(uint32_t flag) { s_aicore_profiling_flag = flag; }
 __attribute__((weak)) __aicore__ uint32_t get_aicore_profiling_flag() { return s_aicore_profiling_flag; }
@@ -52,6 +53,13 @@ __attribute__((weak)) __aicore__ void set_aicore_l2_perf_ring(__gm__ L2PerfAicor
     s_aicore_l2_perf_ring = ring;
 }
 __attribute__((weak)) __aicore__ __gm__ L2PerfAicoreRing *get_aicore_l2_perf_ring() { return s_aicore_l2_perf_ring; }
+
+__attribute__((weak)) __aicore__ void set_aicore_l0_current_task_id(uint32_t task_id) {
+    s_aicore_l0_current_task_id = task_id;
+}
+__attribute__((weak)) __aicore__ uint32_t get_aicore_l0_current_task_id() {
+    return s_aicore_l0_current_task_id;
+}
 
 extern __aicore__ void aicore_execute(__gm__ Runtime *runtime, int block_idx, CoreType core_type);
 

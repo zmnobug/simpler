@@ -65,6 +65,17 @@
 #define RUNTIME_MAX_FANOUT 128
 #endif
 
+#ifndef L2_KERNEL_EVENT_MAX
+#define L2_KERNEL_EVENT_MAX 8
+#endif
+
+struct L2KernelEventRecord {
+    uint16_t event_id;
+    uint16_t flags;
+    uint32_t reserved;
+    uint64_t timestamp;
+};
+
 // =============================================================================
 // L2PerfRecord - Single Task Execution Record
 // =============================================================================
@@ -77,16 +88,24 @@ struct L2PerfRecord {
     uint64_t start_time;  // Task start timestamp (get_sys_cnt)
     uint64_t end_time;    // Task end timestamp
     uint64_t duration;    // Execution duration (end - start)
-
-    // AICPU-side timestamps (written by AICPU, not AICore)
-    uint64_t dispatch_time;  // AICPU timestamp: when task was dispatched to AICore
-    uint64_t finish_time;    // AICPU timestamp: when AICPU observed task completion
+    uint64_t ack_time;           // Timestamp just before AICore writes ACK
+    uint64_t compute_end_time;   // Timestamp immediately after execute_task()
+    uint64_t barrier_end_time;   // Timestamp after optional dump/barrier work
 
     // AICore writes the register dispatch token (low 32 bits only) zero-extended into task_id.
     // For tensormap_and_ringbuffer, AICPU overwrites with the full PTO2 encoding
     // (ring_id << 32) | local_id after FIN/perf row match.
     // For host_build_graph, task_id stays as the plain integer task index (ring_id = 0).
     uint64_t task_id;
+
+    // AICPU-side timestamps (written by AICPU, not AICore)
+    uint64_t dispatch_time;  // AICPU timestamp: when task was dispatched to AICore
+    uint64_t finish_time;    // AICPU timestamp: when AICPU observed task completion
+
+    uint32_t kernel_event_count;  // Number of valid kernel_events[] entries
+    uint32_t kernel_event_overflow;
+    L2KernelEventRecord kernel_events[L2_KERNEL_EVENT_MAX];
+
     uint32_t func_id;    // Kernel function identifier
     CoreType core_type;  // Core type (AIC/AIV)
 

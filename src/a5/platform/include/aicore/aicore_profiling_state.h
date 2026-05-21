@@ -64,6 +64,14 @@ __aicore__ void set_aicore_l2_perf_ring(__gm__ L2PerfAicoreRing *ring);
 __aicore__ __gm__ L2PerfAicoreRing *get_aicore_l2_perf_ring();
 
 /**
+ * Reserved current-task profiling state. L0 swimlane markers are written by
+ * the executor directly to the L2 perf ring; business kernels should not read
+ * this state or depend on profiling fields in kernel_entry(args).
+ */
+__aicore__ void set_aicore_l0_current_task_id(uint32_t task_id);
+__aicore__ uint32_t get_aicore_l0_current_task_id();
+
+/**
  * Per-core PMU staging ring (a5-only — AICore writes the snapshot).
  */
 __aicore__ void set_aicore_pmu_ring(__gm__ PmuAicoreRing *ring);

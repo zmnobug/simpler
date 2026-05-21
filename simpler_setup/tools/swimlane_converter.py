@@ -32,6 +32,9 @@ from typing import Any
 
 from .sched_overhead_analysis import run_analysis as run_sched_overhead_analysis
 
+L0_NPU_MODEL_FILENAME = "l0-swimlane-npu-model.json"
+LEGACY_L0_SWIMLANE_FILENAME = "l0_swimlane_records.json"
+
 
 def _func_id_to_letter(func_id):
     """Map a non-negative integer func_id to a numeric+letter label.
@@ -57,7 +60,7 @@ def normalize_pto2_task_id_int(v):
     Returns None if ``v`` is not convertible to int.
     """
     try:
-        t = int(v)
+        t = int(v, 0) if isinstance(v, str) else int(v)
     except (TypeError, ValueError):
         return None
     if t < 0:
@@ -168,6 +171,128 @@ def load_deps_json(perf_records_path):
         seen.add(key)
         by_pred[pred].append(succ)
     return dict(by_pred)
+
+
+def load_l0_swimlane_json(perf_records_path):
+    """Load optional L0 NPU model records next to ``l2_perf_records.json``."""
+    parent = Path(perf_records_path).parent
+    l0_path = None
+    for filename in (L0_NPU_MODEL_FILENAME, LEGACY_L0_SWIMLANE_FILENAME):
+        candidate = parent / filename
+        if candidate.exists():
+            l0_path = candidate
+            break
+    if l0_path is None:
+        return None
+    try:
+        with l0_path.open() as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"Warning: failed to read {l0_path}: {e}; skipping L0 NPU model", file=sys.stderr)
+        return None
+    events = data.get("events")
+    if data.get("version") != 1 or not isinstance(events, list):
+        print(f"Warning: unsupported L0 NPU model schema in {l0_path}; skipping", file=sys.stderr)
+        return None
+    return events
+
+
+def load_dump_args_json(perf_records_path):
+    """Load dump-args records next to ``l2_perf_records.json``.
+
+    Returns a task-id keyed mapping. Each value is a list because a task may
+    carry records for multiple subtask slots or stages. Missing dump-args data
+    is not an error: L0 visualization should still work without ``--dump-tensor``.
+    """
+    manifest_path = Path(perf_records_path).parent / "tensor_dump" / "tensor_dump.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        with manifest_path.open() as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"Warning: failed to read {manifest_path}: {e}; skipping dump args", file=sys.stderr)
+        return None
+
+    records = data.get("args")
+    if not isinstance(records, list):
+        return None
+
+    by_task: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        task_id = normalize_pto2_task_id_int(record.get("task_id"))
+        if task_id is None:
+            continue
+        by_task[task_id].append(record)
+
+    if not by_task:
+        return None
+    return dict(by_task)
+
+
+def _summarize_dump_args_record(record, max_tensors=8, max_scalars=8):
+    tensors = record.get("tensors") if isinstance(record.get("tensors"), list) else []
+    scalars = record.get("scalars") if isinstance(record.get("scalars"), list) else []
+    summary = {
+        "stage": record.get("stage"),
+        "subtaskId": record.get("subtask_id"),
+        "funcId": record.get("func_id"),
+        "tensorCount": record.get("tensor_count", len(tensors)),
+        "scalarCount": record.get("scalar_count", len(scalars)),
+        "payloadSize": record.get("payload_size"),
+        "overwritten": record.get("overwritten", False),
+    }
+    summary["tensors"] = [
+        {
+            "argIndex": t.get("arg_index"),
+            "dtype": t.get("dtype"),
+            "shape": t.get("shape"),
+            "rawShape": t.get("raw_shape"),
+            "offsets": t.get("offsets"),
+            "bufferSize": t.get("buffer_size"),
+            "isContiguous": t.get("is_contiguous"),
+            "isAllOffsetZero": t.get("is_all_offset_zero"),
+        }
+        for t in tensors[:max_tensors]
+        if isinstance(t, dict)
+    ]
+    summary["scalars"] = scalars[:max_scalars]
+    if len(tensors) > max_tensors:
+        summary["tensorSummaryTruncated"] = True
+    if len(scalars) > max_scalars:
+        summary["scalarSummaryTruncated"] = True
+    return summary
+
+
+def _select_dump_args_for_l0(record, dump_args_by_task):
+    if not dump_args_by_task:
+        return None
+    task_id = normalize_pto2_task_id_int(record.get("task_id"))
+    if task_id is None:
+        return None
+    candidates = dump_args_by_task.get(task_id)
+    if not candidates:
+        return None
+
+    subtask_id = record.get("subtask_id")
+    exact = []
+    if subtask_id is not None:
+        try:
+            subtask_id = int(subtask_id)
+            exact = [r for r in candidates if r.get("subtask_id") == subtask_id]
+        except (TypeError, ValueError):
+            exact = []
+    pool = exact or candidates
+
+    # Prefer the dispatch-time args snapshot. It captures the call payload that
+    # the L0 event is meant to explain; completion records are tensor payload
+    # dumps and are less useful as invocation metadata.
+    for item in pool:
+        if item.get("stage") == "before_dispatch":
+            return item
+    return pool[0]
 
 
 def load_kernel_config(config_path):
@@ -389,6 +514,8 @@ def generate_chrome_trace_json(  # noqa: PLR0912, PLR0915
     core_to_thread=None,
     orchestrator_name=None,
     deps_edges=None,
+    l0_events=None,
+    dump_args_by_task=None,
 ):
     """Generate Chrome Trace Event Format JSON from task data.
 
@@ -405,12 +532,14 @@ def generate_chrome_trace_json(  # noqa: PLR0912, PLR0915
         scheduler_phases: Optional list of per-thread phase record lists (version 2)
         orchestrator_phases: Optional list of per-task orchestrator phase records (version 2)
         core_to_thread: Optional list mapping core_id (index) to scheduler thread index (-1 = unassigned)
+        dump_args_by_task: Optional dump-args mapping from load_dump_args_json()
 
     Generates processes in the trace:
         - pid=1 "AICore View": start_time_us to end_time_us (kernel execution)
         - pid=2 "AICPU View": dispatch_time_us to finish_time_us (AICPU perspective)
         - pid=3 "AICPU Scheduler": scheduler phase bars (version 2)
         - pid=4 "AICPU Orchestrator": orchestrator phase bars or summary (version 2)
+        - pid=5 "AICore L0 View": optional L0 simulator events
     """
     if verbose:
         print("Generating Chrome Trace JSON...")
@@ -1068,6 +1197,170 @@ def generate_chrome_trace_json(  # noqa: PLR0912, PLR0915
                 )
                 flow_id += 1
 
+    if l0_events:
+        events.append(
+            {"args": {"name": "AICore L0 View"}, "cat": "__metadata", "name": "process_name", "ph": "M", "pid": 5}
+        )
+        events.append(
+            {"args": {"sort_index": 0}, "cat": "__metadata", "name": "process_sort_index", "ph": "M", "pid": 5}
+        )
+
+        l0_tids = {}
+        for record in l0_events:
+            try:
+                core_id = int(record.get("core_id", 0))
+            except (TypeError, ValueError):
+                core_id = 0
+            core_type = str(record.get("core_type", "unknown")).upper()
+            tid = 5000 + core_id
+            if tid not in l0_tids:
+                l0_tids[tid] = f"L0_{core_type}_{core_id}"
+
+        for tid, thread_name in sorted(l0_tids.items()):
+            events.append(
+                {
+                    "args": {"name": thread_name},
+                    "cat": "__metadata",
+                    "name": "thread_name",
+                    "ph": "M",
+                    "pid": 5,
+                    "tid": tid,
+                }
+            )
+
+        for record in l0_events:
+            try:
+                task_id = record.get("task_id")
+                func_id = record.get("func_id")
+                core_id = int(record.get("core_id", 0))
+                ts = float(record.get("start_time_us", 0.0))
+                dur = float(record.get("duration_us", 0.0))
+            except (TypeError, ValueError):
+                continue
+            if dur < 0:
+                continue
+            tdisp = format_task_display(task_id)
+            if func_id_to_name and str(func_id) in func_id_to_name:
+                func_name = func_id_to_name[str(func_id)]
+            else:
+                func_name = f"func_{_func_id_to_letter(func_id)}"
+            event_name = f"{func_name}({tdisp})"
+            event_args = {
+                "taskId": task_id,
+                "funcId": func_id,
+                "coreId": core_id,
+                "subtaskId": record.get("subtask_id"),
+                "eventType": record.get("name", "l0"),
+                "argsKey": record.get("args_key", {}),
+            }
+            dump_args_record = _select_dump_args_for_l0(record, dump_args_by_task)
+            if dump_args_record is not None:
+                event_args["dumpArgs"] = _summarize_dump_args_record(dump_args_record)
+            events.append(
+                {
+                    "args": event_args,
+                    "cat": "l0",
+                    "name": event_name,
+                    "ph": "X",
+                    "pid": 5,
+                    "tid": 5000 + core_id,
+                    "ts": ts,
+                    "dur": dur,
+                }
+            )
+            for phase in record.get("phases", []) or []:
+                if not isinstance(phase, dict):
+                    continue
+                try:
+                    phase_name = str(phase.get("name", "phase"))
+                    phase_ts = float(phase.get("start_time_us", ts))
+                    if "duration_us" in phase:
+                        phase_dur = float(phase.get("duration_us", 0.0))
+                    else:
+                        phase_dur = float(phase.get("end_time_us", phase_ts)) - phase_ts
+                except (TypeError, ValueError):
+                    continue
+                if phase_dur < 0:
+                    continue
+                events.append(
+                    {
+                        "args": {
+                            "taskId": task_id,
+                            "funcId": func_id,
+                            "coreId": core_id,
+                            "subtaskId": record.get("subtask_id"),
+                            "phase": phase_name,
+                            "eventType": "l0_phase",
+                        },
+                        "cat": "l0_phase",
+                        "name": f"{func_name}.{phase_name}({tdisp})",
+                        "ph": "X",
+                        "pid": 5,
+                        "tid": 5000 + core_id,
+                        "ts": phase_ts,
+                        "dur": phase_dur,
+                    }
+                )
+            kernel_events = []
+            for kernel_event in record.get("kernel_events", []) or []:
+                if not isinstance(kernel_event, dict):
+                    continue
+                try:
+                    kernel_event_name = str(kernel_event.get("name", "event"))
+                    kernel_event_id = kernel_event.get("event_id")
+                    kernel_event_ts = float(kernel_event.get("timestamp_us", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                if kernel_event_ts <= 0:
+                    continue
+                kernel_events.append((kernel_event_ts, kernel_event_name, kernel_event_id))
+                events.append(
+                    {
+                        "args": {
+                            "taskId": task_id,
+                            "funcId": func_id,
+                            "coreId": core_id,
+                            "subtaskId": record.get("subtask_id"),
+                            "eventId": kernel_event_id,
+                            "eventType": "l0_kernel_event",
+                        },
+                        "cat": "l0_kernel_event",
+                        "name": f"{func_name}.{kernel_event_name}({tdisp})",
+                        "ph": "i",
+                        "pid": 5,
+                        "tid": 5000 + core_id,
+                        "ts": kernel_event_ts,
+                        "s": "t",
+                    }
+                )
+            kernel_events.sort(key=lambda item: item[0])
+            for idx in range(len(kernel_events) - 1):
+                span_ts, span_name, span_event_id = kernel_events[idx]
+                next_ts, next_name, next_event_id = kernel_events[idx + 1]
+                span_dur = next_ts - span_ts
+                if span_dur < 0:
+                    continue
+                events.append(
+                    {
+                        "args": {
+                            "taskId": task_id,
+                            "funcId": func_id,
+                            "coreId": core_id,
+                            "subtaskId": record.get("subtask_id"),
+                            "eventId": span_event_id,
+                            "nextEventId": next_event_id,
+                            "eventType": "l0_kernel_span",
+                        },
+                        "cat": "l0_kernel_span",
+                        "name": f"{func_name}.{span_name}->{next_name}({tdisp})",
+                        "ph": "X",
+                        "pid": 5,
+                        "tid": 5000 + core_id,
+                        "ts": span_ts,
+                        "dur": span_dur,
+                    }
+                )
+
     if verbose:
         print(f"  Total events: {len(events)}")
         print(f"  Flow events: {flow_id}")
@@ -1230,6 +1523,12 @@ def main():
         deps_edges = load_deps_json(input_path)
         if args.verbose and deps_edges is not None:
             print(f"  Using deps.json edges ({sum(len(v) for v in deps_edges.values())} total)")
+        l0_events = load_l0_swimlane_json(input_path)
+        if args.verbose and l0_events is not None:
+            print(f"  Using L0 swimlane events ({len(l0_events)} total)")
+        dump_args_by_task = load_dump_args_json(input_path)
+        if args.verbose and dump_args_by_task is not None:
+            print(f"  Using dump args records ({sum(len(v) for v in dump_args_by_task.values())} total)")
 
         generate_chrome_trace_json(
             data["tasks"],
@@ -1241,6 +1540,8 @@ def main():
             orchestrator_phases=data.get("aicpu_orchestrator_phases"),
             core_to_thread=data.get("core_to_thread"),
             deps_edges=deps_edges,
+            l0_events=l0_events,
+            dump_args_by_task=dump_args_by_task,
         )
 
         print("\n✓ Conversion complete")

@@ -578,17 +578,21 @@ int DeviceRunner::run(Runtime &runtime, int block_dim, int launch_aicpu_num) {
         l2_perf_collector_.read_phase_header_metadata();
         l2_perf_collector_.reconcile_counters();
         l2_perf_collector_.export_swimlane_json();
+        l2_perf_collector_.export_l0_swimlane_json();
+        l2_perf_collector_.finalize(/*unregister_cb=*/nullptr, prof_free_cb);
     }
 
     if (enable_dump_tensor_) {
         dump_collector_.stop();
         dump_collector_.reconcile_counters();
         dump_collector_.export_dump_files();
+        dump_collector_.finalize(/*unregister_cb=*/nullptr, prof_free_cb);
     }
 
     if (enable_pmu_) {
         pmu_collector_.stop();
         pmu_collector_.reconcile_counters();
+        pmu_collector_.finalize(/*unregister_cb=*/nullptr, prof_free_cb);
     }
 
     // Print handshake results at end of run

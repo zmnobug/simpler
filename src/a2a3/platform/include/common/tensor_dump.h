@@ -94,7 +94,7 @@ struct ArgsDumpPayloadHeader {
     uint32_t reserved;
 };
 
-struct ArgsDumpTensorEntry {
+struct alignas(64) ArgsDumpTensorEntry {
     uint64_t buffer_addr;
     uint64_t buffer_size;
     uint64_t owner_task_id;
@@ -106,7 +106,14 @@ struct ArgsDumpTensorEntry {
     uint8_t is_contiguous;
     uint8_t is_all_offset_zero;
     uint8_t reserved;
-};
+} __attribute__((aligned(64)));
+
+static_assert(sizeof(ArgsDumpTensorEntry) == 128, "ArgsDumpTensorEntry must be 128 bytes (2 cache lines)");
+static_assert(alignof(ArgsDumpTensorEntry) == 64, "ArgsDumpTensorEntry must be 64-byte aligned");
+static_assert(offsetof(ArgsDumpTensorEntry, buffer_addr) == 0, "ArgsDumpTensorEntry buffer_addr offset changed");
+static_assert(offsetof(ArgsDumpTensorEntry, buffer_size) == 8, "ArgsDumpTensorEntry buffer_size offset changed");
+static_assert(offsetof(ArgsDumpTensorEntry, owner_task_id) == 16, "ArgsDumpTensorEntry owner_task_id offset changed");
+static_assert(offsetof(ArgsDumpTensorEntry, shapes) == 24, "ArgsDumpTensorEntry shapes offset changed");
 
 struct ArgsDumpInfo {
     uint64_t task_id;

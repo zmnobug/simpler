@@ -47,6 +47,48 @@ static bool is_scheduler_phase(AicpuPhaseId id) {
     return static_cast<uint32_t>(id) < static_cast<uint32_t>(AicpuPhaseId::SCHED_PHASE_COUNT);
 }
 
+struct TaggedL2Record {
+    const L2PerfRecord *record;
+    uint32_t core_id;
+};
+
+static std::vector<TaggedL2Record>
+collect_tagged_l2_records(const std::vector<std::vector<L2PerfRecord>> &collected_perf_records) {
+    size_t total_records = 0;
+    for (const auto &core_records : collected_perf_records) {
+        total_records += core_records.size();
+    }
+
+    std::vector<TaggedL2Record> tagged_records;
+    tagged_records.reserve(total_records);
+    for (size_t core_idx = 0; core_idx < collected_perf_records.size(); core_idx++) {
+        for (const auto &record : collected_perf_records[core_idx]) {
+            tagged_records.push_back({&record, static_cast<uint32_t>(core_idx)});
+        }
+    }
+
+    std::sort(tagged_records.begin(), tagged_records.end(), [](const TaggedL2Record &a, const TaggedL2Record &b) {
+        if (a.record->task_id != b.record->task_id) {
+            return a.record->task_id < b.record->task_id;
+        }
+        return a.core_id < b.core_id;
+    });
+    return tagged_records;
+}
+
+static uint64_t get_l2_base_time_cycles(const std::vector<TaggedL2Record> &tagged_records) {
+    uint64_t base_time_cycles = UINT64_MAX;
+    for (const auto &tagged : tagged_records) {
+        if (tagged.record->start_time < base_time_cycles) {
+            base_time_cycles = tagged.record->start_time;
+        }
+        if (tagged.record->dispatch_time > 0 && tagged.record->dispatch_time < base_time_cycles) {
+            base_time_cycles = tagged.record->dispatch_time;
+        }
+    }
+    return base_time_cycles;
+}
+
 L2PerfCollector::~L2PerfCollector() {
     stop();
     if (shm_host_ != nullptr) {
@@ -537,37 +579,10 @@ int L2PerfCollector::export_swimlane_json() {
     }
 
     // Step 3: Flatten per-core vectors into tagged records with core_id derived from index
-    struct TaggedRecord {
-        const L2PerfRecord *record;
-        uint32_t core_id;
-    };
-    std::vector<TaggedRecord> tagged_records;
-    size_t total_records = 0;
-    for (const auto &core_records : collected_perf_records_) {
-        total_records += core_records.size();
-    }
-    tagged_records.reserve(total_records);
-    for (size_t core_idx = 0; core_idx < collected_perf_records_.size(); core_idx++) {
-        for (const auto &record : collected_perf_records_[core_idx]) {
-            tagged_records.push_back({&record, static_cast<uint32_t>(core_idx)});
-        }
-    }
-
-    // Sort by canonical task_id (64-bit PTO2 raw)
-    std::sort(tagged_records.begin(), tagged_records.end(), [](const TaggedRecord &a, const TaggedRecord &b) {
-        return a.record->task_id < b.record->task_id;
-    });
+    std::vector<TaggedL2Record> tagged_records = collect_tagged_l2_records(collected_perf_records_);
 
     // Step 4: Calculate base time (minimum timestamp across all records)
-    uint64_t base_time_cycles = UINT64_MAX;
-    for (const auto &tagged : tagged_records) {
-        if (tagged.record->start_time < base_time_cycles) {
-            base_time_cycles = tagged.record->start_time;
-        }
-        if (tagged.record->dispatch_time > 0 && tagged.record->dispatch_time < base_time_cycles) {
-            base_time_cycles = tagged.record->dispatch_time;
-        }
-    }
+    uint64_t base_time_cycles = get_l2_base_time_cycles(tagged_records);
 
     // Include phase record timestamps in base_time calculation
     if (has_phase_data_) {
@@ -776,6 +791,120 @@ int L2PerfCollector::export_swimlane_json() {
     LOG_INFO_V0("File: %s", filepath.c_str());
     LOG_INFO_V0("Records: %u", record_count);
 
+    return 0;
+}
+
+int L2PerfCollector::export_l0_swimlane_json() {
+    std::vector<TaggedL2Record> tagged_records = collect_tagged_l2_records(collected_perf_records_);
+    if (tagged_records.empty()) {
+        LOG_WARN("Warning: No L2 records available to seed L0 swimlane export.");
+        return -1;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(output_prefix_, ec);
+    if (ec) {
+        LOG_ERROR("Error: Failed to create output directory %s: %s", output_prefix_.c_str(), ec.message().c_str());
+        return -1;
+    }
+
+    uint64_t base_time_cycles = get_l2_base_time_cycles(tagged_records);
+    if (has_phase_data_) {
+        for (const auto &thread_records : collected_phase_records_) {
+            for (const auto &pr : thread_records) {
+                if (pr.start_time > 0 && pr.start_time < base_time_cycles) {
+                    base_time_cycles = pr.start_time;
+                }
+            }
+        }
+    }
+
+    std::string filepath = output_prefix_ + "/l0-swimlane-npu-model.json";
+    std::ofstream outfile(filepath);
+    if (!outfile.is_open()) {
+        LOG_ERROR("Error: Failed to open file: %s", filepath.c_str());
+        return -1;
+    }
+
+    auto write_phase = [&](const char *name, uint64_t start, uint64_t end, bool *first) {
+        if (start == 0 || end == 0 || end < start) {
+            return;
+        }
+        double start_us = cycles_to_us(start - base_time_cycles);
+        double end_us = cycles_to_us(end - base_time_cycles);
+        if (!*first) {
+            outfile << ", ";
+        }
+        *first = false;
+        outfile << "{\"name\": \"" << name << "\", \"start_time_us\": " << std::fixed << std::setprecision(3)
+                << start_us << ", \"end_time_us\": " << std::fixed << std::setprecision(3) << end_us
+                << ", \"duration_us\": " << std::fixed << std::setprecision(3) << (end_us - start_us) << "}";
+    };
+    auto kernel_event_name = [](uint16_t event_id) -> const char * {
+        switch (event_id) {
+            case 1: return "task_ack";
+            case 2: return "kernel_call_begin";
+            case 3: return "kernel_call_end";
+            case 4: return "finish_signal";
+            default: return "event";
+        }
+    };
+
+    outfile << "{\n";
+    outfile << "  \"version\": 1,\n";
+    outfile << "  \"time_unit\": \"us\",\n";
+    outfile << "  \"args_manifest\": \"tensor_dump/tensor_dump.json\",\n";
+    outfile << "  \"events\": [\n";
+    for (size_t i = 0; i < tagged_records.size(); i++) {
+        const auto &tagged = tagged_records[i];
+        const auto &record = *tagged.record;
+        double start_us = cycles_to_us(record.start_time - base_time_cycles);
+        double end_us = cycles_to_us(record.end_time - base_time_cycles);
+        const char *core_type_str = (record.core_type == CoreType::AIC) ? "aic" : "aiv";
+        uint32_t block_dim = static_cast<uint32_t>(num_aicore_ / PLATFORM_CORES_PER_BLOCKDIM);
+        uint32_t subtask_id =
+            (record.core_type == CoreType::AIC) ? 0 : static_cast<uint32_t>((tagged.core_id - block_dim) % 2 + 1);
+
+        outfile << "    {\"name\": \"kernel\", \"task_id\": " << record.task_id << ", \"func_id\": " << record.func_id
+                << ", \"core_id\": " << tagged.core_id << ", \"core_type\": \"" << core_type_str
+                << "\", \"subtask_id\": " << subtask_id
+                << ", \"start_time_us\": " << std::fixed << std::setprecision(3) << start_us
+                << ", \"end_time_us\": " << std::fixed << std::setprecision(3) << end_us
+                << ", \"duration_us\": " << std::fixed << std::setprecision(3) << (end_us - start_us)
+                << ", \"args_key\": {\"task_id\": " << record.task_id << ", \"subtask_id\": " << subtask_id
+                << "}, \"phases\": [";
+        bool first_phase = true;
+        write_phase("ack", record.ack_time, record.start_time, &first_phase);
+        write_phase("compute", record.start_time, record.compute_end_time, &first_phase);
+        write_phase("dump_barrier", record.compute_end_time, record.barrier_end_time, &first_phase);
+        outfile << "], \"kernel_event_overflow\": " << record.kernel_event_overflow << ", \"kernel_events\": [";
+        uint32_t kernel_event_count =
+            (record.kernel_event_count > L2_KERNEL_EVENT_MAX) ? L2_KERNEL_EVENT_MAX : record.kernel_event_count;
+        bool first_kernel_event = true;
+        for (uint32_t j = 0; j < kernel_event_count; j++) {
+            const auto &event = record.kernel_events[j];
+            if (event.timestamp == 0) {
+                continue;
+            }
+            if (!first_kernel_event) {
+                outfile << ", ";
+            }
+            first_kernel_event = false;
+            double event_us = cycles_to_us(event.timestamp - base_time_cycles);
+            outfile << "{\"event_id\": " << event.event_id << ", \"name\": \"" << kernel_event_name(event.event_id)
+                    << "\", \"timestamp_us\": " << std::fixed << std::setprecision(3) << event_us << "}";
+        }
+        outfile << "]}";
+        if (i + 1 < tagged_records.size()) {
+            outfile << ",";
+        }
+        outfile << "\n";
+    }
+    outfile << "  ]\n";
+    outfile << "}\n";
+    outfile.close();
+
+    LOG_INFO_V0("L0 NPU model export complete: %s", filepath.c_str());
     return 0;
 }
 

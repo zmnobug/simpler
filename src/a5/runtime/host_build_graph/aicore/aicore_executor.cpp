@@ -12,6 +12,7 @@
 #include "aicore/aicore.h"
 #include "aicore/aicore_profiling_state.h"
 #include "aicore/l2_perf_collector_aicore.h"
+#include "aicore/l0_kernel_event_aicore.h"
 #include "aicore/pmu_collector_aicore.h"
 #include "common/l2_perf_profiling.h"
 #include "common/platform_config.h"  // Platform configuration (C/C++ compatible)
@@ -85,6 +86,7 @@ __aicore__ __attribute__((weak)) void aicore_execute(__gm__ Runtime *runtime, in
 
         {
             uint32_t actual_task_id = task_id;
+            uint64_t ack_time = get_sys_cnt_aicore();
             write_reg(RegId::COND, MAKE_ACK_VALUE(actual_task_id));
 
             __gm__ Task *task_ptr = &(runtime->tasks[actual_task_id]);
@@ -94,7 +96,19 @@ __aicore__ __attribute__((weak)) void aicore_execute(__gm__ Runtime *runtime, in
                 pmu_aicore_begin();
             }
 
+            if (l2_perf_enabled) {
+                l0_kernel_event_reset(l2_perf_ring, actual_task_id);
+                l0_kernel_event_mark_at(l2_perf_ring, actual_task_id, L0_KERNEL_EVENT_TASK_ACK, ack_time);
+                l0_kernel_event_mark_at(l2_perf_ring, actual_task_id, L0_KERNEL_EVENT_KERNEL_CALL_BEGIN, start_time);
+            }
+
             execute_task(task_ptr);
+            uint64_t compute_end_time = get_sys_cnt_aicore();
+            if (l2_perf_enabled) {
+                l0_kernel_event_mark_at(
+                    l2_perf_ring, actual_task_id, L0_KERNEL_EVENT_KERNEL_CALL_END, compute_end_time
+                );
+            }
 
             if (pmu_enabled) {
                 pmu_aicore_end();
@@ -104,10 +118,16 @@ __aicore__ __attribute__((weak)) void aicore_execute(__gm__ Runtime *runtime, in
             if (dump_tensor_enabled) {
                 pipe_barrier(PIPE_ALL);
             }
+            uint64_t barrier_end_time = get_sys_cnt_aicore();
 
             if (l2_perf_enabled) {
-                uint64_t end_time = get_sys_cnt_aicore();
-                l2_perf_aicore_record_task(l2_perf_ring, actual_task_id, start_time, end_time);
+                l0_kernel_event_mark_at(
+                    l2_perf_ring, actual_task_id, L0_KERNEL_EVENT_FINISH_SIGNAL, barrier_end_time
+                );
+                l2_perf_aicore_record_task(
+                    l2_perf_ring, actual_task_id, start_time, barrier_end_time, ack_time, compute_end_time,
+                    barrier_end_time
+                );
             }
 
             last_task_id = task_id;

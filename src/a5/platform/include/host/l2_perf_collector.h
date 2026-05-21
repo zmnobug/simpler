@@ -256,6 +256,17 @@ public:
     int export_swimlane_json();
 
     /**
+     * Export a host-side L0 NPU model artifact.
+     *
+     * Writes <output_prefix>/l0-swimlane-npu-model.json. The current schema
+     * carries per-dispatch kernel spans from the L2 records plus stable
+     * identity fields that correlate with dump-args entries in
+     * tensor_dump/tensor_dump.json. Sim-only in practice, but harmless for
+     * callers that already collected L2 records.
+     */
+    int export_l0_swimlane_json();
+
+    /**
      * Free all device memory and unregister mappings. Idempotent on a
      * collector that was never initialized.
      *
