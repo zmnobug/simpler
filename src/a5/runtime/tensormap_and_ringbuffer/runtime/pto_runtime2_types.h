@@ -102,7 +102,7 @@
 
 // Memory pools (per-ring defaults; total = value × PTO2_MAX_RING_DEPTH)
 #define PTO2_HEAP_SIZE (256 * 1024 * 1024)  // 256MB per ring (1GB total)
-#define PTO2_DEP_LIST_POOL_SIZE 16384       // Per-ring dependency list pool entries
+#define PTO2_DEP_LIST_POOL_SIZE 32768       // Per-ring dependency list pool entries
 #define PTO2_TENSORMAP_POOL_SIZE (65536)    // TensorMap entry pool
 #define PTO2_TENSORMAP_NUM_BUCKETS 4096     // Power of 2 for fast hash (4096×8B=32KB fits L1)
 

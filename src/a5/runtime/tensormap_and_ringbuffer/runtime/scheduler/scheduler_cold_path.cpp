@@ -231,14 +231,14 @@ bool SchedulerContext::no_thread_owns_running_task() const {
 }
 
 void SchedulerContext::log_stall_diagnostics(
-    int32_t thread_idx, int32_t task_count, int32_t idle_iterations, int32_t last_progress_count
+    int32_t thread_idx, int32_t task_count, int64_t idle_iterations, int32_t last_progress_count
 ) {
     CoreTracker &tracker = core_trackers_[thread_idx];
 
     // T0 owns the shared-ring scan; printing it from other threads would
     // produce identical TASK lines once per scheduler thread.
     if (thread_idx == 0) {
-        int32_t cnt_ready = 0, cnt_waiting = 0, cnt_running = 0, submitted_in_ring = 0;
+        int32_t cnt_unwired = 0, cnt_ready = 0, cnt_waiting = 0, cnt_running = 0, submitted_in_ring = 0;
         for (int r = 0; r < PTO2_MAX_RING_DEPTH; r++) {
             PTO2SharedMemoryRingHeader &ring = *sched_->ring_sched_states[r].ring;
             int32_t ring_task_count = ring.fc.current_task_index.load(std::memory_order_relaxed);
@@ -278,10 +278,20 @@ void SchedulerContext::log_stall_diagnostics(
                     cnt_running++;
                     if (cnt_running > STALL_DUMP_READY_MAX) continue;
                     LOG_INFO_V9(
-                        "[STALL thread=%d idle_iterations=%d] TASK ring=%d task_id=%" PRId64
+                        "[STALL thread=%d idle_iterations=%" PRId64 "] TASK ring=%d task_id=%" PRId64
                         " state=RUNNING fanin_refcount=%d/%d kernels=[aic:%d aiv0:%d aiv1:%d] "
                         "running_on=[owner_thread=%d cores=[%s]]",
                         thread_idx, idle_iterations, r, task_id, rc, fi, kid_aic, kid_aiv0, kid_aiv1, owner, running_on
+                    );
+                    continue;
+                }
+                if (fi == 0) {
+                    cnt_unwired++;
+                    if (cnt_unwired > STALL_DUMP_READY_MAX) continue;
+                    LOG_INFO_V9(
+                        "[STALL thread=%d idle_iterations=%" PRId64 "] TASK ring=%d task_id=%" PRId64
+                        " state=UNWIRED fanin_refcount=%d/%d kernels=[aic:%d aiv0:%d aiv1:%d]",
+                        thread_idx, idle_iterations, r, task_id, rc, fi, kid_aic, kid_aiv0, kid_aiv1
                     );
                     continue;
                 }
@@ -289,7 +299,7 @@ void SchedulerContext::log_stall_diagnostics(
                     cnt_ready++;
                     if (cnt_ready > STALL_DUMP_READY_MAX) continue;
                     LOG_INFO_V9(
-                        "[STALL thread=%d idle_iterations=%d] TASK ring=%d task_id=%" PRId64
+                        "[STALL thread=%d idle_iterations=%" PRId64 "] TASK ring=%d task_id=%" PRId64
                         " state=READY   fanin_refcount=%d/%d kernels=[aic:%d aiv0:%d aiv1:%d]",
                         thread_idx, idle_iterations, r, task_id, rc, fi, kid_aic, kid_aiv0, kid_aiv1
                     );
@@ -298,7 +308,7 @@ void SchedulerContext::log_stall_diagnostics(
                 cnt_waiting++;
                 if (cnt_waiting > STALL_DUMP_WAIT_MAX) continue;
                 LOG_INFO_V9(
-                    "[STALL thread=%d idle_iterations=%d] TASK ring=%d task_id=%" PRId64
+                    "[STALL thread=%d idle_iterations=%" PRId64 "] TASK ring=%d task_id=%" PRId64
                     " state=WAIT    fanin_refcount=%d/%d kernels=[aic:%d aiv0:%d aiv1:%d] missing_deps=%d",
                     thread_idx, idle_iterations, r, task_id, rc, fi, kid_aic, kid_aiv0, kid_aiv1, fi - rc
                 );
@@ -307,9 +317,10 @@ void SchedulerContext::log_stall_diagnostics(
         int32_t effective_total = task_count > 0 ? task_count : submitted_in_ring;
         int32_t c = completed_tasks_.load(std::memory_order_relaxed);
         LOG_INFO_V9(
-            "[STALL thread=%d idle_iterations=%d] SUMMARY completed=%d/%d last_progress_iteration=%d "
-            "scan_ready=%d scan_waiting=%d scan_running=%d",
-            thread_idx, idle_iterations, c, effective_total, last_progress_count, cnt_ready, cnt_waiting, cnt_running
+            "[STALL thread=%d idle_iterations=%" PRId64 "] SUMMARY completed=%d/%d last_progress_iteration=%d "
+            "scan_unwired=%d scan_ready=%d scan_waiting=%d scan_running=%d",
+            thread_idx, idle_iterations, c, effective_total, last_progress_count, cnt_unwired, cnt_ready, cnt_waiting,
+            cnt_running
         );
     }
 
@@ -339,17 +350,17 @@ void SchedulerContext::log_stall_diagnostics(
             core_exec_states_[aiv1_id].reg_addr
         );
         LOG_INFO_V9(
-            "[STALL thread=%d idle_iterations=%d] CLUSTER cluster_id=%d aic=%s aiv0=%s aiv1=%s", thread_idx,
+            "[STALL thread=%d idle_iterations=%" PRId64 "] CLUSTER cluster_id=%d aic=%s aiv0=%s aiv1=%s", thread_idx,
             idle_iterations, cluster_id, aic_buf, aiv0_buf, aiv1_buf
         );
     }
 }
 
 void SchedulerContext::log_shutdown_stall_snapshot(
-    int32_t trigger_thread_idx, int32_t trigger_idle_iterations, int32_t trigger_last_progress_count
+    int32_t trigger_thread_idx, int64_t trigger_idle_iterations, int32_t trigger_last_progress_count
 ) {
     LOG_WARN(
-        "[SHUTDOWN_SNAPSHOT trigger_thread=%d reason=scheduler_timeout idle_iterations=%d] "
+        "[SHUTDOWN_SNAPSHOT trigger_thread=%d reason=scheduler_timeout idle_iterations=%" PRId64 "] "
         "dumping all scheduler threads before emergency shutdown",
         trigger_thread_idx, trigger_idle_iterations
     );
@@ -367,7 +378,7 @@ void SchedulerContext::log_shutdown_stall_snapshot(
 }
 
 int32_t SchedulerContext::handle_timeout_exit(
-    int32_t thread_idx, PTO2SharedMemoryHeader *header, Runtime *runtime, int32_t idle_iterations,
+    int32_t thread_idx, PTO2SharedMemoryHeader *header, Runtime *runtime, int64_t idle_iterations,
     int32_t last_progress_count
 #if PTO2_PROFILING
     ,
@@ -375,7 +386,8 @@ int32_t SchedulerContext::handle_timeout_exit(
 #endif
 ) {
     LOG_ERROR(
-        "[STALL thread=%d idle_iterations=%d] TIMEOUT_EXIT after_idle_iterations=%d", thread_idx, idle_iterations,
+        "[STALL thread=%d idle_iterations=%" PRId64 "] TIMEOUT_EXIT after_idle_iterations=%" PRId64, thread_idx,
+        idle_iterations,
         idle_iterations
     );
     latch_scheduler_error(header, thread_idx, PTO2_ERROR_SCHEDULER_TIMEOUT);

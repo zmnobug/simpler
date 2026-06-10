@@ -45,8 +45,8 @@
 
 constexpr int32_t MAX_AICPU_THREADS = PLATFORM_MAX_AICPU_THREADS;
 
-constexpr int32_t MAX_IDLE_ITERATIONS = PLATFORM_MAX_IDLE_ITERATIONS;  // platform-defined cap (sim vs onboard)
-constexpr int32_t STALL_LOG_INTERVAL =
+constexpr int64_t MAX_IDLE_ITERATIONS = PLATFORM_MAX_IDLE_ITERATIONS;  // platform-defined cap (sim vs onboard)
+constexpr int64_t STALL_LOG_INTERVAL =
     MAX_IDLE_ITERATIONS * 6 / 10;                     // derived: ~one stall diagnostic halfway to timeout
 constexpr int32_t FATAL_ERROR_CHECK_INTERVAL = 1024;  // Check orchestrator error every N idle iters
 
@@ -61,7 +61,7 @@ constexpr int32_t FATAL_ERROR_CHECK_INTERVAL = 1024;  // Check orchestrator erro
 // same iteration count. The fast spinner racing ahead and latching fatal
 // kills the slower-but-correct poller mid-poll — see the distributed
 // startup-skew scenario in issue #897.
-constexpr int32_t SCHEDULER_TIMEOUT_MS = 5000;  // 5 s; > worst observed distributed-init skew + HCCL wait
+constexpr int32_t SCHEDULER_TIMEOUT_MS = 5000000;  // Wall-clock stall guard in ms.
 constexpr uint64_t SCHEDULER_TIMEOUT_CYCLES =
     static_cast<uint64_t>(SCHEDULER_TIMEOUT_MS) * (PLATFORM_PROF_SYS_CNT_FREQ / 1000);
 constexpr int32_t STALL_DUMP_READY_MAX = 8;

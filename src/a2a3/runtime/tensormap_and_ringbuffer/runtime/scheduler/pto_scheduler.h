@@ -30,6 +30,7 @@
 #pragma once
 
 #include <atomic>
+#include <inttypes.h>
 
 #include "common/core_type.h"
 #include "utils/device_arena.h"
@@ -590,6 +591,9 @@ struct PTO2SchedulerState {
         alignas(64) std::atomic<int32_t> dep_pool_snapshot_tail;
         std::atomic<int32_t> dep_pool_snapshot_top;
 #endif
+        int32_t dep_pool_block_count;
+        int32_t dep_pool_block_last_task_alive;
+        int64_t dep_pool_block_last_task_id;
 
         // Initialize arena-internal data + arena-external pointers; does NOT
         // store dep_pool.base (that lives in the runtime arena and is wired
@@ -721,20 +725,74 @@ struct PTO2SchedulerState {
             auto &rss = ring_sched_states[ring_id];
             int32_t wfanin = ws->payload->fanin_actual_count;
 
-            if (wfanin > 0 && rss.dep_pool.available() < wfanin) {
+            int32_t available_before = rss.dep_pool.available();
+            if (wfanin > 0 && available_before < wfanin) {
                 rss.dep_pool.reclaim(*rss.ring, rss.last_task_alive);
-                if (rss.dep_pool.available() < wfanin) {
+                int32_t available_after = rss.dep_pool.available();
+                if (available_after < wfanin) {
 #if PTO2_PROFILING
                     if (is_scope_stats_enabled()) {
                         rss.publish_dep_pool_snapshot();
                     }
 #endif
+                    int64_t task_id = static_cast<int64_t>(ws->task->task_id.raw);
+                    bool same_block = rss.dep_pool_block_last_task_id == task_id &&
+                                      rss.dep_pool_block_last_task_alive == rss.last_task_alive;
+                    if (same_block) {
+                        if (rss.dep_pool_block_count < 2147483647) {
+                            rss.dep_pool_block_count++;
+                        }
+                    } else {
+                        rss.dep_pool_block_count = 1;
+                        rss.dep_pool_block_last_task_alive = rss.last_task_alive;
+                        rss.dep_pool_block_last_task_id = task_id;
+                    }
+
+                    bool report_block = rss.dep_pool_block_count == 1 ||
+                                        rss.dep_pool_block_count == PTO2_DEP_POOL_SPIN_LIMIT ||
+                                        (rss.dep_pool_block_count > PTO2_DEP_POOL_SPIN_LIMIT &&
+                                         rss.dep_pool_block_count % (PTO2_DEP_POOL_SPIN_LIMIT * 10) == 0);
+                    if (report_block) {
+                        int32_t current = rss.ring->fc.current_task_index.load(std::memory_order_acquire);
+                        int32_t used = rss.dep_pool.used();
+                        int32_t rc = ws->fanin_refcount.load(std::memory_order_relaxed);
+                        if (rss.dep_pool_block_count >= PTO2_DEP_POOL_SPIN_LIMIT) {
+                            LOG_ERROR(
+                                "DEP_POOL_BLOCK ring=%d task_id=%" PRId64
+                                " block_count=%d wfanin=%d available_before=%d available_after=%d "
+                                "top=%d tail=%d used=%d high_water=%d capacity=%d "
+                                "last_task_alive=%d current_task_index=%d in_flight=%d "
+                                "wiring_batch=%d/%d wiring_queue=%" PRIu64 " fanin_refcount=%d/%d",
+                                ring_id, task_id, rss.dep_pool_block_count, wfanin, available_before,
+                                available_after, rss.dep_pool.top, rss.dep_pool.tail, used, rss.dep_pool.high_water,
+                                rss.dep_pool.capacity, rss.last_task_alive, current, current - rss.last_task_alive,
+                                wiring.batch_index, wiring.batch_count, static_cast<uint64_t>(wiring.queue.size()), rc,
+                                ws->fanin_count
+                            );
+                        } else {
+                            LOG_WARN(
+                                "DEP_POOL_BLOCK ring=%d task_id=%" PRId64
+                                " block_count=%d wfanin=%d available_before=%d available_after=%d "
+                                "top=%d tail=%d used=%d high_water=%d capacity=%d "
+                                "last_task_alive=%d current_task_index=%d in_flight=%d "
+                                "wiring_batch=%d/%d wiring_queue=%" PRIu64 " fanin_refcount=%d/%d",
+                                ring_id, task_id, rss.dep_pool_block_count, wfanin, available_before,
+                                available_after, rss.dep_pool.top, rss.dep_pool.tail, used, rss.dep_pool.high_water,
+                                rss.dep_pool.capacity, rss.last_task_alive, current, current - rss.last_task_alive,
+                                wiring.batch_index, wiring.batch_count, static_cast<uint64_t>(wiring.queue.size()), rc,
+                                ws->fanin_count
+                            );
+                        }
+                    }
                     break;  // not enough dep_pool space — keep remainder for next call
                 }
             }
 
             wiring.batch_index++;
             wire_task(rss, ws, wfanin);
+            rss.dep_pool_block_count = 0;
+            rss.dep_pool_block_last_task_alive = -1;
+            rss.dep_pool_block_last_task_id = -1;
             wired++;
         }
 

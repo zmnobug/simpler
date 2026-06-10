@@ -507,7 +507,7 @@ int32_t SchedulerContext::resolve_and_dispatch(Runtime *runtime, int32_t thread_
 
     LOG_INFO_V0("Thread %d: PTO2 dispatch starting with %d cores", thread_idx, tracker.core_num());
     int32_t cur_thread_completed = 0;
-    int32_t idle_iterations = 0;
+    int64_t idle_iterations = 0;
     int32_t last_progress_count = 0;
 #if PTO2_PROFILING
     auto &l2_swimlane = sched_l2_swimlane_[thread_idx];
@@ -857,7 +857,10 @@ int32_t SchedulerContext::resolve_and_dispatch(Runtime *runtime, int32_t thread_
             // case) — refresh last_progress_ts and keep spinning. The
             // STALL diagnostic above still fires periodically so
             // observability is preserved.
-            if (get_sys_cnt_aicpu() - last_progress_ts > SCHEDULER_TIMEOUT_CYCLES) {
+            uint64_t now_ts = get_sys_cnt_aicpu();
+            bool iteration_budget_elapsed = idle_iterations >= MAX_IDLE_ITERATIONS;
+            bool wall_clock_budget_elapsed = now_ts - last_progress_ts > SCHEDULER_TIMEOUT_CYCLES;
+            if (iteration_budget_elapsed || wall_clock_budget_elapsed) {
                 bool self_owns = self_owns_running_task(thread_idx);
                 bool global_stuck = !self_owns && total_tasks_ > 0 &&
                                     completed_tasks_.load(std::memory_order_relaxed) < total_tasks_ &&
@@ -871,7 +874,9 @@ int32_t SchedulerContext::resolve_and_dispatch(Runtime *runtime, int32_t thread_
 #endif
                     );
                 }
-                last_progress_ts = get_sys_cnt_aicpu();
+                if (wall_clock_budget_elapsed) {
+                    last_progress_ts = now_ts;
+                }
             }
             SPIN_WAIT_HINT();
 #if PTO2_PROFILING

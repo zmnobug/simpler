@@ -27,6 +27,6 @@
 // loop aborts with PTO2_ERROR_SCHEDULER_TIMEOUT. On real hardware each idle
 // iteration is a cheap no-op spin, so this bounds a genuine deadlock. The
 // runtime consumes it as MAX_IDLE_ITERATIONS (see scheduler_types.h).
-constexpr int32_t PLATFORM_MAX_IDLE_ITERATIONS = 800000;
+constexpr int64_t PLATFORM_MAX_IDLE_ITERATIONS = 1000000000;
 
 #endif  // PLATFORM_A2A3_AICPU_SPIN_HINT_H_

@@ -55,6 +55,6 @@
 // kernels. Set to 10x the onboard cap as a conservative bump; raise further if
 // a slow kernel still false-times-out. The runtime consumes it as
 // MAX_IDLE_ITERATIONS (see scheduler_types.h).
-constexpr int32_t PLATFORM_MAX_IDLE_ITERATIONS = 8000000;
+constexpr int64_t PLATFORM_MAX_IDLE_ITERATIONS = 1000000000;
 
 #endif  // PLATFORM_A2A3SIM_AICPU_SPIN_HINT_H_

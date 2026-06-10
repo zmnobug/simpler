@@ -76,6 +76,9 @@ bool PTO2SchedulerState::RingSchedState::init_data_from_layout(void *sm_dev_base
     ring = pto2_sm_layout::ring_header_addr(sm_dev_base, ring_id);
     last_task_alive = 0;
     advance_lock.store(0, std::memory_order_relaxed);
+    dep_pool_block_count = 0;
+    dep_pool_block_last_task_alive = -1;
+    dep_pool_block_last_task_id = -1;
 #if PTO2_PROFILING
     dep_pool_snapshot_tail.store(1, std::memory_order_relaxed);
     dep_pool_snapshot_top.store(1, std::memory_order_relaxed);

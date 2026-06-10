@@ -350,10 +350,10 @@ private:
     check_idle_fatal_error(int32_t thread_idx, PTO2SharedMemoryHeader *header, Runtime *runtime);
 
     __attribute__((noinline, cold)) void
-    log_stall_diagnostics(int32_t thread_idx, int32_t task_count, int32_t idle_iterations, int32_t last_progress_count);
+    log_stall_diagnostics(int32_t thread_idx, int32_t task_count, int64_t idle_iterations, int32_t last_progress_count);
 
     __attribute__((noinline, cold)) void log_shutdown_stall_snapshot(
-        int32_t trigger_thread_idx, int32_t trigger_idle_iterations, int32_t trigger_last_progress_count
+        int32_t trigger_thread_idx, int64_t trigger_idle_iterations, int32_t trigger_last_progress_count
     );
 
     // Reverse lookup: given a global core_id, find which scheduler thread's
@@ -377,7 +377,7 @@ private:
     bool no_thread_owns_running_task() const;
 
     __attribute__((noinline, cold)) int32_t handle_timeout_exit(
-        int32_t thread_idx, PTO2SharedMemoryHeader *header, Runtime *runtime, int32_t idle_iterations,
+        int32_t thread_idx, PTO2SharedMemoryHeader *header, Runtime *runtime, int64_t idle_iterations,
         int32_t last_progress_count
 #if PTO2_PROFILING
         ,
