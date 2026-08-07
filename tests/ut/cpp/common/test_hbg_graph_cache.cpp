@@ -22,6 +22,7 @@
 #include "graph_cache.h"
 #include "graph_execution.h"
 #include "runtime_status/error_names.h"
+#include "scheduler/pto_scheduler.h"
 
 namespace {
 
@@ -277,6 +278,37 @@ TEST(GraphExecutionReplay, AffineHitRefreshesOnlyDynamicFields) {
     );
     EXPECT_EQ(node.slot.completed_subtasks.load(std::memory_order_relaxed), 0);
     EXPECT_EQ(node.payload.dispatch_fanin.load(std::memory_order_relaxed), 0);
+
+    graph_execution_mark_completed(*execution);
+    execution->retired_nodes.store(2, std::memory_order_release);
+    submission.local_execution = 0;
+    execution = graph_execution_localize(outer_slot);
+    ASSERT_NE(execution, nullptr);
+    ASSERT_TRUE(execution->definition_affine_reuse);
+    execution->materialized_tensor_patch_count = 1;
+
+    EXPECT_EQ(graph_execution_materialize_slice(outer_slot, *execution, 2), GraphMaterializeResult::INVALID);
+    EXPECT_EQ(execution->materialized_tensor_patches, 1U);
+}
+
+TEST(GraphSubmissionWire, RejectsDefinitionBeyondSubmission) {
+    constexpr uint64_t GRAPH_KEY_VALUE = 0x3456;
+    std::vector<std::byte> image = make_test_submission(GRAPH_KEY_VALUE, 0x1000, 0x2000, 4096);
+    auto &submission = *reinterpret_cast<GraphSubmission *>(image.data());
+    auto *definition = reinterpret_cast<GraphDefinition *>(image.data() + submission.definition_offset);
+    definition->total_bytes = submission.total_bytes - submission.definition_offset + 1;
+
+    EXPECT_EQ(graph_submission_definition(submission), nullptr);
+}
+
+TEST(GraphSubmissionWire, RequiresExactAvailableSize) {
+    constexpr uint64_t GRAPH_KEY_VALUE = 0x4567;
+    std::vector<std::byte> image = make_test_submission(GRAPH_KEY_VALUE, 0x1000, 0x2000, 4096);
+    const auto &submission = *reinterpret_cast<const GraphSubmission *>(image.data());
+
+    EXPECT_TRUE(graph_submission_wire_size_valid(submission, image.size()));
+    EXPECT_FALSE(graph_submission_wire_size_valid(submission, image.size() - 1));
+    EXPECT_FALSE(graph_submission_wire_size_valid(submission, image.size() + 1));
 }
 
 TEST(GraphExecutionWire, RejectsNonzeroReservedFields) {
@@ -362,8 +394,28 @@ TEST(GraphSubmissionActivationGate, ActivatesExactlyOnceUnderContention) {
     }
 }
 
+TEST(GraphSubmissionActivationGate, RetriesDoNotReactivate) {
+    GraphSubmission submission{};
+
+    EXPECT_FALSE(graph_submission_signal(submission, 0x1));
+    EXPECT_TRUE(graph_submission_signal(submission, 0x2));
+    EXPECT_FALSE(graph_submission_signal(submission, 0x1));
+    EXPECT_FALSE(graph_submission_signal(submission, 0x2));
+}
+
 TEST(GraphExecutionErrors, ReadyQueueOverflowHasTriageText) {
     EXPECT_STREQ(error_name(SCHEDULER_ERROR_READY_QUEUE_OVERFLOW), "READY_QUEUE_OVERFLOW");
     EXPECT_STRNE(error_desc(SCHEDULER_ERROR_READY_QUEUE_OVERFLOW), "");
     EXPECT_STRNE(error_hint(SCHEDULER_ERROR_READY_QUEUE_OVERFLOW), "");
+}
+
+TEST(GraphExecutionErrors, InvalidNodeCompletionIsReported) {
+    PTO2SchedulerState scheduler{};
+    PTO2TaskSlotState slot{};
+    slot.task_kind = TaskKind::GRAPH_NODE;
+
+    const PTO2SchedulerState::TaskCompletionOutcome outcome = scheduler.complete_task(slot);
+
+    EXPECT_EQ(outcome.error_code, PTO2_ERROR_INVALID_ARGS);
+    EXPECT_EQ(outcome.stream_tasks_completed, 0);
 }

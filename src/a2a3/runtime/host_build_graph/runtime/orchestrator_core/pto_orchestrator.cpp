@@ -414,6 +414,9 @@ void graph_record_note_fanin(PTO2OrchestratorState *orch, PTO2TaskSlotState *pro
         recording.unsupported = true;
         return;
     }
+    // A negative index names a producer submitted before recording. Its tensor
+    // is represented by a Graph boundary, so only recorded producers become
+    // saved-node fanin edges.
     if (producer_index >= 0) recording.current_fanins.push_back(static_cast<size_t>(producer_index));
 }
 
@@ -1505,7 +1508,10 @@ bool graph_submit_definition(
         PTO2TaskSlotState *producer = &ring.get_slot_state_by_slot(producer_slot);
         return append_fanin_or_fail(orch, producer_id.ring(), producer_slot, producer, producer_id, &fanin_builder);
     };
-    if (!compute_task_fanin(boundary_inputs, orch->tensor_map, orch->in_manual_scope(), emit)) return false;
+    if (!compute_task_fanin(boundary_inputs, orch->tensor_map, orch->in_manual_scope(), emit)) {
+        slot.task_kind = TaskKind::DUMMY;
+        return false;
+    }
     register_task_outputs(boundary_inputs, task_id, orch->tensor_map, orch->in_manual_scope());
     payload.fanin_count = fanin_builder.count;
 

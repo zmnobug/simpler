@@ -497,7 +497,9 @@ struct alignas(64) PTO2TaskSlotState {
     std::atomic<int16_t> next_block_idx{0};
 
     // Graph scheduling metadata occupies the slot's tail padding. Ordinary
-    // ring tasks keep the index invalid and the context null.
+    // ring tasks keep the index invalid and the context null. For host-built
+    // outer slots, graph_context is assigned its final device address and is
+    // intentionally excluded from arena-pointer relocation.
     int32_t graph_node_index{-1};
     void *graph_context{nullptr};
 
@@ -534,12 +536,13 @@ struct alignas(64) PTO2TaskSlotState {
     bool has_any_subtask_deferred() const { return any_subtask_deferred.load(std::memory_order_acquire); }
 
     /**
-     * Reset dynamic scheduling fields to their pristine values. Runs once per
-     * slot at init (pto_shared_memory.cpp) — whole-graph-resident hbg has no
-     * execution-time slot recycle. Skips payload/task (bound once) and
-     * task_state (the orchestrator sets PENDING when it populates the slot).
-     * wake_list_head starts nullptr (open for registration), NOT SENTINEL.
-     * Affine Graph replay preserves the node's retained execution binding.
+     * Reset dynamic scheduling fields to their pristine values. Called when a
+     * slot is initialized and when retained Graph node storage is replayed.
+     * Whole-graph-resident hbg has no execution-time ring-slot recycle. Skips
+     * payload/task (bound once) and task_state (the orchestrator sets PENDING
+     * when it populates the slot). wake_list_head starts nullptr (open for
+     * registration), NOT SENTINEL. Affine Graph replay preserves the node's
+     * retained execution binding.
      */
     void reset_for_reuse(bool preserve_graph_binding = false) {
         wake_list_head.store(nullptr, std::memory_order_relaxed);

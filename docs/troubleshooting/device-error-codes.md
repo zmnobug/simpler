@@ -140,9 +140,9 @@ always *fallout* — scroll up for the first failure on that device. For classif
 
 ## Minimal reproductions
 
-Each code has a live, minimal trigger in `tests/st/runtime_fatal_codes/`. These are
-the fastest way to see what a code looks like, and the shape to copy when you
-suspect one:
+Each publicly triggerable code listed below has a live, minimal trigger in
+`tests/st/runtime_fatal_codes/`. These are the fastest way to see what a code
+looks like, and the shape to copy when you suspect one:
 
 | Code | How the ST provokes it | Fixture |
 | ---- | ---------------------- | ------- |
@@ -167,7 +167,7 @@ enforces coverage. Edit those and the log carries the new code correctly:
 | ---- | ----- |
 | runtime code names / descriptions / hints | `src/common/runtime_status/error_names.h` |
 | host-side CANN names / descriptions / hints | `src/common/platform/include/host/acl_error_names.h` |
-| `SCHEDULER_TIMEOUT` sub-class labels | `src/{arch}/runtime/tensormap_and_ringbuffer/common/pto_runtime_status.h` |
+| `SCHEDULER_TIMEOUT` sub-class labels | `src/{arch}/runtime/{host_build_graph,tensormap_and_ringbuffer}/common/pto_runtime_status.h` |
 | completeness test | `tests/ut/cpp/common/test_error_code_names.cpp` |
 
 **This page does not need updating for a new code** — deliberately. The tables
@@ -177,7 +177,7 @@ time, so there is nothing to drift out of sync.
 
 ## References
 
-- Code definitions: `src/{arch}/runtime/tensormap_and_ringbuffer/common/pto_runtime_status.h`
+- Code definitions: `src/{arch}/runtime/{host_build_graph,tensormap_and_ringbuffer}/common/pto_runtime_status.h`
 - Host print site: `.../host/runtime_maker.cpp` (`validate_runtime_impl`)
 - Sub-class logic: `.../runtime/scheduler/scheduler_cold_path.cpp` (`classify_stall_reason`)
 - End-to-end negative tests: `tests/st/runtime_fatal_codes/`

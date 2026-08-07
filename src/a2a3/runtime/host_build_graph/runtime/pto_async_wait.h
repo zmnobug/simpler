@@ -9,8 +9,7 @@
  * -----------------------------------------------------------------------------------------------------------
  */
 
-#ifndef PTO_ASYNC_WAIT_H
-#define PTO_ASYNC_WAIT_H
+#pragma once
 
 #include <atomic>
 #include <cstddef>
@@ -121,7 +120,8 @@ struct AsyncWaitEntry {
 };
 
 struct AsyncPollResult {
-    int32_t completed{0};
+    int32_t completed{0};  // Host-submitted stream tasks completed.
+    int32_t resolved{0};   // All task completions, including internal Graph nodes.
     int32_t error_code{PTO2_ERROR_NONE};
     PTO2TaskSlotState *failed_slot_state{nullptr};
 };
@@ -171,6 +171,8 @@ struct AsyncWaitList {
     struct DrainCompletionSink {
         PTO2SchedulerState *sched{nullptr};
         int32_t inline_completed{0};
+        int32_t inline_resolved{0};
+        int32_t error_code{PTO2_ERROR_NONE};
 #if SIMPLER_SCHED_PROFILING
         int32_t thread_idx{0};
 #endif
@@ -233,7 +235,10 @@ struct AsyncWaitList {
                     // conditions => NotDeferred. Complete it inline when the
                     // sink allows; otherwise fall back to the entry-store path.
                     if (sink.can_inline_complete()) {
-                        (void)try_inline_complete_locked(sink, *slot_state_ptr);
+                        if (!try_inline_complete_locked(sink, *slot_state_ptr)) {
+                            error_code = sink.error_code;
+                            return drained;
+                        }
                         continue;
                     }
                     if (count >= MAX_ASYNC_WAITS) {
@@ -291,5 +296,3 @@ struct AsyncWaitList {
 #endif
     );
 };
-
-#endif  // PTO_ASYNC_WAIT_H
