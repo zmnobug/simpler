@@ -512,7 +512,7 @@ struct PTO2SchedulerState {
         if (!pushed) {
             int32_t expected = PTO2_ERROR_NONE;
             sm_header->sched_error_code.compare_exchange_strong(
-                expected, PTO2_ERROR_READY_QUEUE_OVERFLOW, std::memory_order_acq_rel, std::memory_order_acquire
+                expected, SCHEDULER_ERROR_READY_QUEUE_OVERFLOW, std::memory_order_acq_rel, std::memory_order_acquire
             );
         }
     }

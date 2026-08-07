@@ -23,8 +23,7 @@
  * Full triage steps per code: docs/troubleshooting/device-error-codes.md
  */
 
-#ifndef SRC_COMMON_RUNTIME_STATUS_ERROR_NAMES_H_
-#define SRC_COMMON_RUNTIME_STATUS_ERROR_NAMES_H_
+#pragma once
 
 #include <stdint.h>
 
@@ -70,6 +69,10 @@ static inline const char *error_name(int32_t code) {
         return "ASYNC_WAIT_OVERFLOW";
     case PTO2_ERROR_ASYNC_REGISTRATION_FAILED:
         return "ASYNC_REGISTRATION_FAILED";
+#ifdef SCHEDULER_ERROR_READY_QUEUE_OVERFLOW
+    case SCHEDULER_ERROR_READY_QUEUE_OVERFLOW:
+        return "READY_QUEUE_OVERFLOW";
+#endif
     default:
         return "unknown";
     }
@@ -124,6 +127,10 @@ static inline const char *error_desc(int32_t code) {
     case PTO2_ERROR_ASYNC_REGISTRATION_FAILED:
         return "the scheduler received an async completion message of an illegal kind (runtime-internal; "
                "ASYNC_WAIT_OVERFLOW normally intercepts this first)";
+#ifdef SCHEDULER_ERROR_READY_QUEUE_OVERFLOW
+    case SCHEDULER_ERROR_READY_QUEUE_OVERFLOW:
+        return "a ready queue rejected a task even though each queue is sized for the complete shipped task prefix";
+#endif
     default:
         return "";
     }
@@ -165,6 +172,9 @@ static inline const char *error_hint(int32_t code) {
     case PTO2_ERROR_SCOPE_TASKS_OVERFLOW:
     case PTO2_ERROR_TENSORMAP_OVERFLOW:
     case PTO2_ERROR_ASYNC_REGISTRATION_FAILED:
+#ifdef SCHEDULER_ERROR_READY_QUEUE_OVERFLOW
+    case SCHEDULER_ERROR_READY_QUEUE_OVERFLOW:
+#endif
         return "not expected in normal operation -- keep the device log and report it to the runtime "
                "maintainers; tuning the ring capacities will not help";
     case PTO2_ERROR_SCHEDULER_TIMEOUT:
@@ -191,5 +201,3 @@ static inline int32_t latched_error_code(int32_t orch_error_code, int32_t sched_
 static inline const char *latched_error_field(int32_t orch_error_code, int32_t sched_error_code) {
     return orch_error_code != PTO2_ERROR_NONE ? "orch_error_code" : "sched_error_code";
 }
-
-#endif  // SRC_COMMON_RUNTIME_STATUS_ERROR_NAMES_H_

@@ -2,7 +2,7 @@
 
 ← [Device Error Codes](../device-error-codes.md)
 
-Three codes and three stall sub-classes have no ST — not from neglect, but because
+Four codes and three stall sub-classes have no ST — not from neglect, but because
 they cannot be provoked. Recording why, so the next person does not re-derive it
 (the argument lives in `tests/st/runtime_fatal_codes/test_runtime_fatal_codes.py`):
 
@@ -10,6 +10,12 @@ they cannot be provoked. Recording why, so the next person does not re-derive it
   at `MAX_COMPLETIONS_PER_TASK` (64) and latches **102** on the 65th condition, so
   the scheduler-side "more than 64" check that would raise 103 never sees enough
   messages. 103 is reachable only by corrupting the slab (UB) or a malformed message.
+- **104 READY_QUEUE_OVERFLOW** guards an internal scheduler invariant. Every ready
+  queue can hold the complete shipped task prefix and every task is routed to one
+  queue exactly once, so a valid public submission cannot fill it. Reaching 104
+  means the queue state or shipped task window is internally inconsistent; the
+  scheduler latches the code because the rejected task would otherwise appear as a
+  later forward-progress timeout.
 - **10 SCOPE_TASKS_OVERFLOW** cannot be reached either. `scope_tasks_cap` is the sum
   of the per-ring windows, but each ring physically holds only `window - 1` tasks, so
   all rings together top out at `cap - PTO2_MAX_RING_DEPTH` — strictly below the cap.
@@ -29,5 +35,5 @@ The name tables are held complete for these anyway
 (`tests/ut/cpp/common/test_error_code_names.cpp`) — an unreachable code is exactly
 the one that would otherwise print as a bare number on the day it finally fires.
 
-If you do hit 10, 11, 103, S4, S5 or unknown, it is a runtime bug. Keep the device
+If you do hit 10, 11, 103, 104, S4, S5 or unknown, it is a runtime bug. Keep the device
 log and report it.

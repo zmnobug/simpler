@@ -25,6 +25,8 @@ The simplest runtime. The host CPU builds the complete task dependency graph bef
 - No device-side orchestration overhead
 
 See [host_build_graph/docs/RUNTIME_LOGIC.md](../runtime/host_build_graph/docs/RUNTIME_LOGIC.md) for details.
+Graph recording and replay are documented in
+[GRAPH_EXECUTION.md](../runtime/host_build_graph/docs/GRAPH_EXECUTION.md).
 
 ## tensormap_and_ringbuffer (PTO2)
 

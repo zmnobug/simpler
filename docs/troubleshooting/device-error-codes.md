@@ -77,6 +77,7 @@ layer to go looking in, which is what these columns are for.
 | 101 | ASYNC_COMPLETION_INVALID | kernel (async) |
 | 102 | ASYNC_WAIT_OVERFLOW | kernel (async) |
 | 103 | ASYNC_REGISTRATION_FAILED | runtime-internal |
+| 104 | READY_QUEUE_OVERFLOW | runtime-internal |
 
 ### SCHEDULER_TIMEOUT sub-classes
 
@@ -135,7 +136,7 @@ always *fallout* — scroll up for the first failure on that device. For classif
 | a capacity code — 1, 2, 4 | [Capacity](device-error-codes/capacity.md) |
 | a stall — 100, or code 8 | [Stalls](device-error-codes/stall.md) |
 | a `VEC`/`CUBE` instruction error or UB out of bounds in the device log | [AICore faults](device-error-codes/aicore-fault.md) |
-| 10, 11, 103, S4, S5 or unknown | [Codes with no end-to-end test](device-error-codes/untested.md) — and it is a runtime bug |
+| 10, 11, 103, 104, S4, S5 or unknown | [Codes with no end-to-end test](device-error-codes/untested.md) — and it is a runtime bug |
 
 ## Minimal reproductions
 

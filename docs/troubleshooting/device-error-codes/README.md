@@ -16,7 +16,7 @@ the reported code or watchdog signature, then use the matching guide below.
 | Document | What it covers |
 | -------- | -------------- |
 | [AICore Faults](aicore-fault.md) | Separating kernel addressing faults from control-flow corruption using device logs and static inspection |
-| [Codes Without End-to-End Tests](untested.md) | Why codes 10, 11, 103 and stall classes S4, S5, and unknown cannot be triggered through the public API |
+| [Codes Without End-to-End Tests](untested.md) | Why codes 10, 11, 103, 104 and stall classes S4, S5, and unknown cannot be triggered through the public API |
 
 ## Related, outside this directory
 

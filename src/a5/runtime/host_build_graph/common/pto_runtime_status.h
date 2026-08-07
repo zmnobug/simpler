@@ -10,9 +10,9 @@
  */
 
 /**
- * PTO2 Runtime Status Helpers
+ * Runtime Status Helpers
  *
- * Shared error-code contract used inside the tensormap_and_ringbuffer runtime.
+ * Shared error-code contract used inside the host_build_graph runtime.
  */
 
 #pragma once
@@ -38,6 +38,7 @@
 #define PTO2_ERROR_ASYNC_COMPLETION_INVALID 101
 #define PTO2_ERROR_ASYNC_WAIT_OVERFLOW 102
 #define PTO2_ERROR_ASYNC_REGISTRATION_FAILED 103
+#define SCHEDULER_ERROR_READY_QUEUE_OVERFLOW 104  // a ready queue rejected a task from the shipped task prefix
 
 static inline int32_t runtime_status_from_error_codes(int32_t orch_error_code, int32_t sched_error_code) {
     if (orch_error_code != PTO2_ERROR_NONE) {
